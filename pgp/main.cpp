@@ -83,7 +83,9 @@ int main()
 	unsigned char *encrypt = NULL;
 	unsigned char *plain = NULL;
 	unsigned char *decrypt = NULL;
+	long ori_length = 0;
 	long group_num = 0;
+	long length_byte = 0;
 	while (1)
 	{
 		scanf("%d", &c);
@@ -146,28 +148,30 @@ int main()
 				fin.seekg(0, std::ios::end);
 				long length = fin.tellg();
 				fin.seekg(0);
-				group_num = length / 8 + 3;
-				buf = new char[group_num * 8];
-				memset(buf, 0, group_num * 8 * sizeof(char));
+				group_num = length / 16 + 2;
+				buf = new char[group_num * 16];
+				memset(buf, 0, group_num * 16 * sizeof(char));
 				long * len0 = (long *)buf;
 				len0[0] = length;
-				fin.read(buf + 8, length);
+				fin.read(buf + 16, length);
 				fin.close();
 				unsigned char md[17] = { 0 };
-				unsigned char * si = new unsigned char[ECDSA_size(eckey)+1];
-				memset(si, 0, ECDSA_size(eckey) + 1);
-				MD5((unsigned char *)buf, (group_num - 1) * 8, md);
+				unsigned char * si = (unsigned char*) malloc(ECDSA_size(eckey)+1);
+				memset(si, 0, (ECDSA_size(eckey) + 1));
+				MD5((unsigned char *)buf, group_num * 16, md);
 				ECDSA_sign(0, md, 8, si, &siglength, eckey);
 				len0[1] = siglength;
-				int sign = ECDSA_verify(0, md, 8, si, siglength, eckey);
-
-
-
-				strcat(buf + (group_num - 1) * 8, (char*)si);
+				int h = sizeof(char);
+				//int sign = ECDSA_verify(0, md, 8, si, siglength, eckey_pub);
+				int signum = siglength / 16 + 1;
+				char * buf2 = new char[(group_num + signum) * 16];
+				memset(buf2, 0, (group_num + signum) * 16 * sizeof(char));
+				memcpy(buf2, buf, group_num * 16 *sizeof(char));				
+				memcpy(buf2 + group_num * 16, si, siglength + 1);
 				free(si);
 				AES_KEY key;
 				unsigned char userkey[AES_BLOCK_SIZE] = "114514";
-				long length_byte = group_num * 8 * sizeof(char);
+				length_byte = (group_num + signum) * 16 * sizeof(char);
 				encrypt = (unsigned char *)malloc(length_byte);
 				memset((void*)encrypt, 0, length_byte);
 				/*设置加密key及密钥长度*/
@@ -175,9 +179,12 @@ int main()
 				int len = 0;
 				/*循环加密，每次只能加密AES_BLOCK_SIZE长度的数据*/
 				while (len < length_byte) {
-					AES_encrypt((unsigned char *)buf + len, encrypt + len, &key);
+					AES_encrypt((unsigned char *)buf2 + len, encrypt + len, &key);
 					len += AES_BLOCK_SIZE;
 				}
+				free(buf);
+				free(buf2);
+				continue;
 			}
 			else
 			{
@@ -188,6 +195,7 @@ int main()
 				fin.seekg(0);
 				file_length_byte = length *sizeof(char);
 				buf = new char[length];
+				memset((void*)buf, 0, file_length_byte);
 				fin.read(buf, length);
 			};
 			continue;
@@ -199,7 +207,7 @@ int main()
 			int len = 0;
 			AES_set_decrypt_key(userkey, AES_BLOCK_SIZE * 8, &key);
 			plain = (unsigned char *)malloc(file_length_byte);
-			memset((void*)plain, 0, file_length_byte);
+			memset(plain, 0, file_length_byte);
 			/*循环解密*/
 			while (len < file_length_byte) {
 				AES_decrypt((unsigned char *)buf + len, plain + len, &key);
@@ -210,16 +218,17 @@ int main()
 			long * len1 = (long *)plain;
 			int eclen = len1[1];
 			len1[1] = 0;
-			MD5((unsigned char *)plain, len1[0]+16, md);
+			int group_temp = len1[0] / 16;
+			MD5((unsigned char *)plain, group_temp * 16 + 32, md);
 			decrypt = new unsigned char[len1[0]+1];
 			decrypt[len1[0]] = 0;
-			memcpy(decrypt, plain + 8, len1[0]);
-			unsigned char * test = plain + len1[0] + 8;
+			memcpy(decrypt, plain + 16, len1[0]);
+			ori_length = len1[0];
+			unsigned char * test = plain + group_temp * 16 + 32;
 			int sign = ECDSA_verify(0, md, 8, test, eclen,eckey);
-
-
-			
-			
+			if (sign == 1) MessageBox(NULL, _T("签名验证成功"), _T(" "), MB_OK);
+			else MessageBox(NULL, _T("签名验证失败"), _T(" "), MB_OK);
+			free(plain);
 			continue;
 		}
 		if (c == 6)
@@ -228,13 +237,13 @@ int main()
 			{
 				if (constpath == NULL) continue;
 				_tcscat(constpath, _T(".enc"));
-				constsave((char *)encrypt, group_num * 8);
+				constsave((char *)encrypt,length_byte);
 			}
 			if (decrypt != NULL)
 			{
 				if (constpath == NULL) continue;
 				_tcscat(constpath, _T(".dec"));
-				constsave((char *)decrypt,file_length_byte/2);
+				constsave((char *)decrypt,ori_length);
 			}
 			continue;
 		}
